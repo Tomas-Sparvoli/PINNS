@@ -1,0 +1,6 @@
+seed: 42
+device: cuda
+
+paths:
+  data: data
+  results: results
