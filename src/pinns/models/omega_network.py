@@ -9,10 +9,15 @@ class OmegaNetwork(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(input_size, 64),
+            nn.Linear(input_size, 128),
             nn.Tanh(),
+
+            nn.Linear(128, 64),
+            nn.Tanh(),
+
             nn.Linear(64, 32),
             nn.Tanh(),
+
             nn.Linear(32, 1)
         )
 
