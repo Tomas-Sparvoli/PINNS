@@ -5,48 +5,53 @@ from pinns.models.omega_network import OmegaNetwork
 from pinns.physics.mass_spring import simulate_oscillator
 
 
-# ----------------------------------
+# ============================================================
 # CONFIGURACIÓN
-# ----------------------------------
+# ============================================================
 
 N_POINTS = 1000
 
 OMEGA_MIN = 5.0
 OMEGA_MAX = 50.0
 
+T_TOTAL = 10.0
+
 EPOCHS = 1000
 LEARNING_RATE = 1e-3
 
-# Temperatura del soft-argmax
-SOFTMAX_TEMPERATURE = 0.05
+MODEL_PATH = "omega_network_fft_peak.pth"
 
 
-# ----------------------------------
+# ============================================================
 # DATASET
-# ----------------------------------
+# ============================================================
 
-omegas = torch.arange(
+omegas = torch.tensor([
     5.0,
-    50.1,
-    1.0
-)
+    10.0,
+    20.0,
+    30.0,
+    40.0,
+    50.0,
+])
 
-# ----------------------------------
+
+# ============================================================
 # TIEMPO
-# ----------------------------------
+# ============================================================
 
 t = torch.linspace(
     0,
-    10,
+    T_TOTAL,
     N_POINTS
 )
 
 dt = t[1] - t[0]
 
 
-# ----------------------------------
+# ============================================================
 # FRECUENCIAS DE LA FFT
-# ----------------------------------
+# ============================================================
 
 frequencies = torch.fft.rfftfreq(
     N_POINTS,
@@ -60,9 +65,9 @@ omega_bins = (
 )
 
 
-# ----------------------------------
+# ============================================================
 # GENERAR SEÑALES
-# ----------------------------------
+# ============================================================
 
 signals = []
 
@@ -75,77 +80,55 @@ for omega in omegas:
 
     signals.append(x)
 
-
 signals = torch.stack(signals)
 
 
-# ----------------------------------
-# FUNCIÓN PARA OBTENER
-# FRECUENCIA DOMINANTE DIFERENCIABLE
-# ----------------------------------
+# ============================================================
+# OBTENER PICO FFT
+# ============================================================
 
-def soft_peak_omega(
-    signals,
-    temperature=0.05
-):
+def fft_peak_omega(signals):
 
-    # FFT real-valued
     spectrum = torch.fft.rfft(
         signals
     )
 
-    # Magnitud
     magnitude = torch.abs(
         spectrum
     )
 
-    # Normalizar cada espectro
-    magnitude = (
-        magnitude
-        /
-        (
-            magnitude.max(
-                dim=1,
-                keepdim=True
-            ).values
-            + 1e-8
-        )
-    )
-
-    # Soft-argmax
-    weights = torch.softmax(
-        magnitude / temperature,
+    # Ignoramos DC
+    peak_index = torch.argmax(
+        magnitude[:, 1:],
         dim=1
-    )
+    ) + 1
 
-    # Frecuencia angular esperada
-    omega_estimated = (
-        weights
-        * omega_bins
-    ).sum(
-        dim=1
-    )
+    omega_peak = omega_bins[
+        peak_index
+    ]
 
-    return omega_estimated
+    return omega_peak
 
 
-# ----------------------------------
-# FRECUENCIA DOMINANTE REAL
-# ----------------------------------
+# ============================================================
+# FRECUENCIA OBTENIDA MEDIANTE FFT
+# ============================================================
 
 with torch.no_grad():
 
-    omega_fft_real = soft_peak_omega(
-        signals,
-        SOFTMAX_TEMPERATURE
+    omega_fft = fft_peak_omega(
+        signals
     )
 
 
-print("\nFrecuencias dominantes reales:")
+print()
+print("========================================")
+print("FRECUENCIAS OBTENIDAS MEDIANTE FFT")
+print("========================================")
 
 for real, fft_value in zip(
     omegas,
-    omega_fft_real
+    omega_fft
 ):
 
     print(
@@ -154,185 +137,160 @@ for real, fft_value in zip(
     )
 
 
-# ----------------------------------
+# ============================================================
 # MODELO
-# ----------------------------------
+# ============================================================
 
 model = OmegaNetwork(
-    input_size=N_POINTS,
     omega_min=OMEGA_MIN,
     omega_max=OMEGA_MAX
 )
 
 
-# ----------------------------------
+# ============================================================
 # OPTIMIZADOR
-# ----------------------------------
+# ============================================================
 
-optimizer = torch.optim.Adam(
+optimizer = torch.optim.AdamW(
     model.parameters(),
-    lr=LEARNING_RATE
+    lr=LEARNING_RATE,
+    weight_decay=1e-4
 )
 
 
-# ----------------------------------
+# ============================================================
 # LOSS
-# ----------------------------------
+# ============================================================
 
 loss_function = nn.MSELoss()
 
 
-# ----------------------------------
+# ============================================================
 # PREDICCIONES INICIALES
-# ----------------------------------
+# ============================================================
 
 with torch.no_grad():
 
     omega_initial = model(
-        signals
+        omega_fft.unsqueeze(1)
     ).squeeze(1)
 
 
-print("\nPredicciones iniciales:")
+print()
+print("========================================")
+print("PREDICCIONES INICIALES")
+print("========================================")
 
-for real, pred in zip(
+for real, fft_value, pred in zip(
     omegas,
+    omega_fft,
     omega_initial
 ):
 
     print(
         f"ω real = {real.item():6.2f} | "
+        f"ω FFT = {fft_value.item():6.2f} | "
         f"ω inicial = {pred.item():6.2f}"
     )
 
 
-# ----------------------------------
+# ============================================================
 # ENTRENAMIENTO
-# ----------------------------------
+# ============================================================
 
 for epoch in range(EPOCHS):
 
     optimizer.zero_grad()
 
 
-    # ----------------------------------
+    # --------------------------------------------------------
     # RED
-    # ----------------------------------
+    # --------------------------------------------------------
 
     omega_pred = model(
-        signals
+        omega_fft.unsqueeze(1)
     ).squeeze(1)
 
 
-    # ----------------------------------
-    # SIMULADOR
-    # ----------------------------------
-
-    predicted_signals = []
-
-    for omega in omega_pred:
-
-        x_pred = simulate_oscillator(
-            t,
-            omega
-        )
-
-        predicted_signals.append(
-            x_pred
-        )
-
-
-    predicted_signals = torch.stack(
-        predicted_signals
-    )
-
-
-    # ----------------------------------
-    # FRECUENCIA DOMINANTE PREDICHA
-    # ----------------------------------
-
-    omega_fft_pred = soft_peak_omega(
-        predicted_signals,
-        SOFTMAX_TEMPERATURE
-    )
-
-
-    # ----------------------------------
-    # LOSS DE FRECUENCIA DOMINANTE
-    # ----------------------------------
+    # --------------------------------------------------------
+    # LOSS
+    # --------------------------------------------------------
 
     loss = loss_function(
-        omega_fft_pred,
-        omega_fft_real
+        omega_pred,
+        omegas
     )
 
 
-    # ----------------------------------
+    # --------------------------------------------------------
     # BACKPROPAGATION
-    # ----------------------------------
+    # --------------------------------------------------------
 
     loss.backward()
 
 
-    # ----------------------------------
+    # --------------------------------------------------------
     # ACTUALIZACIÓN
-    # ----------------------------------
+    # --------------------------------------------------------
 
     optimizer.step()
 
 
-    # ----------------------------------
+    # --------------------------------------------------------
     # MOSTRAR LOSS
-    # ----------------------------------
+    # --------------------------------------------------------
 
     if epoch % 100 == 0:
 
         print(
             f"Epoch {epoch:4d} | "
-            f"Loss Peak FFT = {loss.item():.6f}"
+            f"Loss = {loss.item():.8f}"
         )
 
 
-# ----------------------------------
+# ============================================================
 # RESULTADOS FINALES
-# ----------------------------------
+# ============================================================
 
 with torch.no_grad():
 
     omega_final = model(
-        signals
+        omega_fft.unsqueeze(1)
     ).squeeze(1)
 
-    omega_fft_final = soft_peak_omega(
-        predicted_signals,
-        SOFTMAX_TEMPERATURE
-    )
 
+print()
+print("========================================")
+print("RESULTADOS FINALES")
+print("========================================")
 
-print("\nResultados:")
-
-for real, pred, fft_pred in zip(
+for real, fft_value, pred in zip(
     omegas,
-    omega_final,
-    omega_fft_final
+    omega_fft,
+    omega_final
 ):
+
+    error = pred.item() - real.item()
 
     print(
         f"ω real = {real.item():6.2f} | "
+        f"ω FFT = {fft_value.item():6.2f} | "
         f"ω pred = {pred.item():6.2f} | "
-        f"ω pico FFT = {fft_pred.item():6.2f}"
+        f"error = {error:+7.2f}"
     )
 
-# ----------------------------------
-# GUARDAR MODELO ENTRENADO
-# ----------------------------------
+
+# ============================================================
+# GUARDAR MODELO
+# ============================================================
 
 torch.save(
     model.state_dict(),
-    "omega_network_fft.pth"
+    MODEL_PATH
 )
 
+print()
 print(
-    "\nModelo guardado en: "
-    "omega_network_fft.pth"
+    "Modelo guardado en: "
+    f"{MODEL_PATH}"
 )

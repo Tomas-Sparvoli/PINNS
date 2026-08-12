@@ -4,35 +4,41 @@ from pinns.models.omega_network import OmegaNetwork
 from pinns.physics.mass_spring import simulate_oscillator
 
 
-# ----------------------------------
+# ============================================================
 # CONFIGURACIÓN
-# ----------------------------------
+# ============================================================
 
 N_POINTS = 1000
-
-T_TOTAL = 10.0
 
 OMEGA_MIN = 5.0
 OMEGA_MAX = 50.0
 
-# Valores que NO fueron utilizados
-# durante el entrenamiento
+T_TOTAL = 10.0
+
+MODEL_PATH = "omega_network_fft_peak.pth"
+
+
+# ============================================================
+# VALORES DE PRUEBA
+# ============================================================
+
 OMEGAS_TEST = [
-    7.0,
-    12.0,
-    17.0,
-    22.0,
-    27.0,
-    32.0,
-    37.0,
-    42.0,
-    47.0
+    6.70,
+    9.40,
+    13.20,
+    16.80,
+    21.30,
+    25.70,
+    29.40,
+    34.60,
+    41.80,
+    47.30
 ]
 
 
-# ----------------------------------
+# ============================================================
 # TIEMPO
-# ----------------------------------
+# ============================================================
 
 t = torch.linspace(
     0,
@@ -40,112 +46,154 @@ t = torch.linspace(
     N_POINTS
 )
 
+dt = t[1] - t[0]
 
-# ----------------------------------
-# MODELO
-# ----------------------------------
+
+# ============================================================
+# FRECUENCIAS DE LA FFT
+# ============================================================
+
+frequencies = torch.fft.rfftfreq(
+    N_POINTS,
+    d=dt
+)
+
+omega_bins = (
+    2.0
+    * torch.pi
+    * frequencies
+)
+
+
+# ============================================================
+# FUNCIÓN PARA OBTENER EL PICO FFT
+# ============================================================
+
+def fft_peak_omega(signal):
+
+    spectrum = torch.fft.rfft(
+        signal
+    )
+
+    magnitude = torch.abs(
+        spectrum
+    )
+
+    # Ignoramos la componente DC
+    peak_index = torch.argmax(
+        magnitude[1:]
+    ) + 1
+
+    omega_peak = omega_bins[
+        peak_index
+    ]
+
+    return omega_peak
+
+
+# ============================================================
+# GENERAR SEÑALES DE PRUEBA
+# ============================================================
+
+signals = []
+
+for omega in OMEGAS_TEST:
+
+    x = simulate_oscillator(
+        t,
+        omega
+    )
+
+    signals.append(x)
+
+signals = torch.stack(
+    signals
+)
+
+
+# ============================================================
+# CARGAR MODELO
+# ============================================================
 
 model = OmegaNetwork(
-    input_size=N_POINTS,
     omega_min=OMEGA_MIN,
     omega_max=OMEGA_MAX
 )
 
-
-# ----------------------------------
-# CARGAR RED ENTRENADA
-# ----------------------------------
-
 model.load_state_dict(
     torch.load(
-        "omega_network_fft.pth",
-        weights_only=True
+        MODEL_PATH,
+        map_location="cpu"
     )
 )
 
 model.eval()
 
 
-# ----------------------------------
+# ============================================================
 # EVALUACIÓN
-# ----------------------------------
+# ============================================================
 
-print("\n========================================")
+print()
+print("============================================================")
 print("PRUEBA DE GENERALIZACIÓN")
-print("========================================")
+print("============================================================")
+
+print()
+print("Valores utilizados para la prueba:")
 
 print(
-    "\nLa red fue entrenada con:"
-)
-
-print(
-    "5, 10, 15, 20, 25, 30, 35, 40, 45, 50"
-)
-
-print(
-    "\nAhora se evalúa con valores no vistos:"
-)
-
-print(
-    "7, 12, 17, 22, 27, 32, 37, 42, 47"
+    ", ".join(
+        f"{omega:.2f}"
+        for omega in OMEGAS_TEST
+    )
 )
 
 
-# ----------------------------------
-# PROBAR CADA SEÑAL
-# ----------------------------------
+print()
+print("============================================================")
+print("RESULTADOS")
+print("============================================================")
+
 
 with torch.no_grad():
 
-    for omega_real in OMEGAS_TEST:
+    for omega_real, signal in zip(
+        OMEGAS_TEST,
+        signals
+    ):
 
-        # ----------------------------------
-        # GENERAR SEÑAL NUEVA
-        # ----------------------------------
+        # ----------------------------------------------------
+        # FFT
+        # ----------------------------------------------------
 
-        signal_test = simulate_oscillator(
-            t,
-            torch.tensor(omega_real)
+        omega_fft = fft_peak_omega(
+            signal
         )
 
 
-        # ----------------------------------
-        # AGREGAR DIMENSIÓN BATCH
-        # ----------------------------------
-
-        signal_test = signal_test.unsqueeze(0)
-
-
-        # ----------------------------------
-        # INFERENCIA
-        # ----------------------------------
+        # ----------------------------------------------------
+        # RED
+        # ----------------------------------------------------
 
         omega_pred = model(
-            signal_test
-        ).squeeze()
+            omega_fft.reshape(1, 1)
+        ).item()
 
 
-        # ----------------------------------
+        # ----------------------------------------------------
         # ERROR
-        # ----------------------------------
+        # ----------------------------------------------------
 
         error = (
-            omega_pred.item()
-            -
-            omega_real
+            omega_pred
+            - omega_real
         )
 
-
-        absolute_error = abs(error)
-
-
-        # ----------------------------------
-        # RESULTADO
-        # ----------------------------------
 
         print(
             f"ω real = {omega_real:6.2f} | "
-            f"ω pred = {omega_pred.item():6.2f} | "
+            f"ω FFT = {omega_fft.item():6.2f} | "
+            f"ω pred = {omega_pred:6.2f} | "
             f"error = {error:+7.2f}"
-            f" | |error| = {absolute_error:6.2f}"
         )

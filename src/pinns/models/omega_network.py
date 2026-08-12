@@ -6,7 +6,6 @@ class OmegaNetwork(nn.Module):
 
     def __init__(
         self,
-        input_size,
         omega_min=5.0,
         omega_max=50.0
     ):
@@ -17,16 +16,10 @@ class OmegaNetwork(nn.Module):
         self.omega_max = omega_max
 
         self.net = nn.Sequential(
-            nn.Linear(input_size, 256),
-            nn.SiLU(),
-            
-            nn.Linear(256, 128),
+            nn.Linear(1, 32),
             nn.SiLU(),
 
-            nn.Linear(128, 64),
-            nn.SiLU(),
-
-            nn.Linear(64, 32),
+            nn.Linear(32, 32),
             nn.SiLU(),
 
             nn.Linear(32, 1)
