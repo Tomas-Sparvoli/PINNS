@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from pinns.models.omega_network import OmegaNetwork
+from pinns.models.omega_network_etapa1 import OmegaNetwork
 from pinns.physics.mass_spring import simulate_oscillator
 
 
@@ -19,7 +19,13 @@ T_TOTAL = 10.0
 EPOCHS = 1000
 LEARNING_RATE = 1e-3
 
-MODEL_PATH = "omega_network_fft_peak.pth"
+MODEL_PATH = "omega_network_etapa1.pth"
+
+# ============================================================
+# SEMILLA
+# ============================================================
+
+torch.manual_seed(42)
 
 
 # ============================================================
@@ -32,8 +38,16 @@ omegas = torch.tensor([
     20.0,
     30.0,
     40.0,
-    50.0,
+    50.0
 ])
+
+
+# ============================================================
+# CONDICIONES INICIALES
+# ============================================================
+
+x0 = torch.tensor(1.0)
+v0 = torch.tensor(0.0)
 
 
 # ============================================================
@@ -73,18 +87,25 @@ signals = []
 
 for omega in omegas:
 
+    # --------------------------------------------------------
+    # ω NUEVO → SIMULADOR
+    # --------------------------------------------------------
+
     x = simulate_oscillator(
         t,
-        omega
+        omega,
+        x0,
+        v0
     )
 
     signals.append(x)
+
 
 signals = torch.stack(signals)
 
 
 # ============================================================
-# OBTENER PICO FFT
+# FFT
 # ============================================================
 
 def fft_peak_omega(signals):
@@ -97,7 +118,10 @@ def fft_peak_omega(signals):
         spectrum
     )
 
-    # Ignoramos DC
+    # --------------------------------------------------------
+    # IGNORAR DC
+    # --------------------------------------------------------
+
     peak_index = torch.argmax(
         magnitude[:, 1:],
         dim=1
@@ -111,7 +135,7 @@ def fft_peak_omega(signals):
 
 
 # ============================================================
-# FRECUENCIA OBTENIDA MEDIANTE FFT
+# OBTENER ω FFT
 # ============================================================
 
 with torch.no_grad():
@@ -121,10 +145,23 @@ with torch.no_grad():
     )
 
 
+# ============================================================
+# MOSTRAR FFT
+# ============================================================
+
 print()
-print("========================================")
-print("FRECUENCIAS OBTENIDAS MEDIANTE FFT")
-print("========================================")
+print("============================================================")
+print("ETAPA 1 - FFT")
+print("============================================================")
+
+print()
+print(
+    "ω real        ω FFT"
+)
+
+print(
+    "--------------------------------------------"
+)
 
 for real, fft_value in zip(
     omegas,
@@ -132,8 +169,8 @@ for real, fft_value in zip(
 ):
 
     print(
-        f"ω real = {real.item():6.2f} | "
-        f"ω FFT = {fft_value.item():6.2f}"
+        f"{real.item():8.2f}        "
+        f"{fft_value.item():8.4f}"
     )
 
 
@@ -177,9 +214,18 @@ with torch.no_grad():
 
 
 print()
-print("========================================")
+print("============================================================")
 print("PREDICCIONES INICIALES")
-print("========================================")
+print("============================================================")
+
+print()
+print(
+    "ω real        ω FFT        ω inicial"
+)
+
+print(
+    "--------------------------------------------"
+)
 
 for real, fft_value, pred in zip(
     omegas,
@@ -188,9 +234,9 @@ for real, fft_value, pred in zip(
 ):
 
     print(
-        f"ω real = {real.item():6.2f} | "
-        f"ω FFT = {fft_value.item():6.2f} | "
-        f"ω inicial = {pred.item():6.2f}"
+        f"{real.item():8.2f}        "
+        f"{fft_value.item():8.4f}        "
+        f"{pred.item():10.4f}"
     )
 
 
@@ -198,13 +244,32 @@ for real, fft_value, pred in zip(
 # ENTRENAMIENTO
 # ============================================================
 
+print()
+print("============================================================")
+print("ENTRENAMIENTO ETAPA 1")
+print("============================================================")
+
+print()
+print(
+    "Epoch        Loss"
+)
+
+print(
+    "--------------------------------------------"
+)
+
+
 for epoch in range(EPOCHS):
+
+    # --------------------------------------------------------
+    # LIMPIAR GRADIENTES
+    # --------------------------------------------------------
 
     optimizer.zero_grad()
 
 
     # --------------------------------------------------------
-    # RED
+    # ω FFT → OMEGANETWORK → ω PRED
     # --------------------------------------------------------
 
     omega_pred = model(
@@ -237,14 +302,14 @@ for epoch in range(EPOCHS):
 
 
     # --------------------------------------------------------
-    # MOSTRAR LOSS
+    # MOSTRAR
     # --------------------------------------------------------
 
     if epoch % 100 == 0:
 
         print(
-            f"Epoch {epoch:4d} | "
-            f"Loss = {loss.item():.8f}"
+            f"{epoch:5d}        "
+            f"{loss.item():16.8f}"
         )
 
 
@@ -260,9 +325,18 @@ with torch.no_grad():
 
 
 print()
-print("========================================")
-print("RESULTADOS FINALES")
-print("========================================")
+print("============================================================")
+print("RESULTADOS FINALES ETAPA 1")
+print("============================================================")
+
+print()
+print(
+    "ω real        ω FFT        ω pred        error"
+)
+
+print(
+    "------------------------------------------------------------"
+)
 
 for real, fft_value, pred in zip(
     omegas,
@@ -270,13 +344,17 @@ for real, fft_value, pred in zip(
     omega_final
 ):
 
-    error = pred.item() - real.item()
+    error = (
+        pred.item()
+        -
+        real.item()
+    )
 
     print(
-        f"ω real = {real.item():6.2f} | "
-        f"ω FFT = {fft_value.item():6.2f} | "
-        f"ω pred = {pred.item():6.2f} | "
-        f"error = {error:+7.2f}"
+        f"{real.item():8.2f}        "
+        f"{fft_value.item():8.4f}        "
+        f"{pred.item():10.4f}        "
+        f"{error:+10.4f}"
     )
 
 
@@ -288,6 +366,7 @@ torch.save(
     model.state_dict(),
     MODEL_PATH
 )
+
 
 print()
 print(

@@ -4,19 +4,26 @@ import torch
 def simulate_oscillator(
     t: torch.Tensor,
     omega: torch.Tensor,
-    amplitude: float = 1.0,
+    x0: torch.Tensor,
+    v0: torch.Tensor,
 ) -> torch.Tensor:
     """
-    Simula un oscilador armónico simple.
+    Simula un oscilador armónico simple a partir
+    de sus condiciones iniciales.
 
     Parámetros
     ----------
     t : torch.Tensor
         Vector temporal.
+
     omega : torch.Tensor
         Frecuencia angular del sistema.
-    amplitude : float
-        Amplitud inicial.
+
+    x0 : torch.Tensor
+        Posición inicial x(0).
+
+    v0 : torch.Tensor
+        Velocidad inicial dx/dt(0).
 
     Retorna
     -------
@@ -24,6 +31,10 @@ def simulate_oscillator(
         Respuesta x(t) del oscilador.
     """
 
-    x = amplitude * torch.sin(omega * t)
+    x = (
+        x0 * torch.cos(omega * t)
+        +
+        (v0 / omega) * torch.sin(omega * t)
+    )
 
     return x

@@ -1,6 +1,6 @@
 import torch
 
-from pinns.models.omega_network import OmegaNetwork
+from pinns.models.omega_network_etapa1 import OmegaNetwork
 from pinns.physics.mass_spring import simulate_oscillator
 
 
@@ -15,7 +15,7 @@ OMEGA_MAX = 50.0
 
 T_TOTAL = 10.0
 
-MODEL_PATH = "omega_network_fft_peak.pth"
+MODEL_PATH = "omega_network_etapa1.pth"
 
 
 # ============================================================
@@ -95,13 +95,18 @@ def fft_peak_omega(signal):
 # GENERAR SEÑALES DE PRUEBA
 # ============================================================
 
+x0 = torch.tensor(1.0)
+v0 = torch.tensor(0.0)
+
 signals = []
 
 for omega in OMEGAS_TEST:
 
     x = simulate_oscillator(
         t,
-        omega
+        omega,
+        x0,
+        v0
     )
 
     signals.append(x)
