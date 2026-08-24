@@ -8,25 +8,65 @@ from pinns.physics.mass_spring import simulate_oscillator
 # CONFIGURACIÓN
 # ============================================================
 
-N_POINTS = 1000
-T_TOTAL = 10.0
+N_POINTS = 4000
+T_TOTAL = 20.0
 
-N_SYSTEMS = 40
-N_TRAIN = 32
-N_TEST = 8
+N_SYSTEMS = 1000
+TRAIN_RATIO = 0.80
 
-M_MIN = 0.5
-M_MAX = 3.0
+N_TRAIN = int(
+    N_SYSTEMS * TRAIN_RATIO
+)
+
+N_TEST = (
+    N_SYSTEMS - N_TRAIN
+)
+
+
+# ============================================================
+# RANGO DE FRECUENCIA
+# ============================================================
+
+OMEGA_MIN = 5.0
+OMEGA_MAX = 100.0
+
+
+# ============================================================
+# RANGO DE RIGIDEZ
+# ============================================================
 
 K_MIN = 25.0
-K_MAX = 1600.0
+K_MAX = 500.0
 
-MIN_OMEGA_SEPARATION = 0.5
+
+# ============================================================
+# RANGO DE MASA
+#
+# Se obtiene indirectamente a partir de:
+#
+# m = k / omega^2
+#
+# Para la relación definida debajo queda aproximadamente:
+#
+# 0.5556 <= m <= 1.0
+# ============================================================
+
+M_MIN = 0.05
+M_MAX = 1.0
+
+
+# ============================================================
+# ENTRENAMIENTO
+# ============================================================
 
 EPOCHS = 2000
+
 LEARNING_RATE = 1e-3
 
-MODEL_PATH = "omega_network_identificoKyM_etapa3_normalizado.pth"
+
+MODEL_PATH = (
+    "omega_network_etapa3_dataset1000_omega100_sin_fisica.pth"
+)
 
 
 # ============================================================
@@ -41,6 +81,7 @@ torch.manual_seed(42)
 # ============================================================
 
 x0 = torch.tensor(1.0)
+
 v0 = torch.tensor(0.0)
 
 
@@ -50,177 +91,91 @@ v0 = torch.tensor(0.0)
 
 print()
 print("============================================================")
-print("GENERACIÓN DEL DATASET")
+print("GENERACIÓN DEL DATASET - RELACIÓN NO LINEAL")
 print("============================================================")
 
 
-k_values = []
-m_values = []
-omega_values = []
+# ------------------------------------------------------------
+# GENERAR ω
+#
+# ω ∈ [5, 30] rad/s
+# ------------------------------------------------------------
 
-
-while len(k_values) < N_SYSTEMS:
-
-    # --------------------------------------------------------
-    # Generar candidato
-    # --------------------------------------------------------
-
-    m_candidate = (
-        M_MIN
-        +
-        (M_MAX - M_MIN)
-        * torch.rand(1).item()
+omega_real = (
+    OMEGA_MIN
+    +
+    torch.rand(N_SYSTEMS)
+    *
+    (
+        OMEGA_MAX
+        -
+        OMEGA_MIN
     )
-
-    k_candidate = (
-        K_MIN
-        +
-        (K_MAX - K_MIN)
-        * torch.rand(1).item()
-    )
-
-
-    # --------------------------------------------------------
-    # Frecuencia natural
-    # --------------------------------------------------------
-
-    omega_candidate = (
-        k_candidate
-        /
-        m_candidate
-    ) ** 0.5
-
-
-    # --------------------------------------------------------
-    # Verificar separación
-    # --------------------------------------------------------
-
-    valid = True
-
-    for omega_existing in omega_values:
-
-        if abs(
-            omega_candidate
-            -
-            omega_existing
-        ) < MIN_OMEGA_SEPARATION:
-
-            valid = False
-            break
-
-
-    # --------------------------------------------------------
-    # Guardar sistema
-    # --------------------------------------------------------
-
-    if valid:
-
-        k_values.append(
-            k_candidate
-        )
-
-        m_values.append(
-            m_candidate
-        )
-
-        omega_values.append(
-            omega_candidate
-        )
-
-
-# ============================================================
-# CONVERTIR A TENSORES
-# ============================================================
-
-k_values = torch.tensor(
-    k_values,
-    dtype=torch.float32
-)
-
-m_values = torch.tensor(
-    m_values,
-    dtype=torch.float32
-)
-
-omega_real = torch.tensor(
-    omega_values,
-    dtype=torch.float32
 )
 
 
-# ============================================================
-# ORDENAR DATASET POR FRECUENCIA
-# ============================================================
+# ------------------------------------------------------------
+# NORMALIZAR ω AL INTERVALO [0,1]
+#
+# z = (ω - ω_min) / (ω_max - ω_min)
+# ------------------------------------------------------------
 
-sort_index = torch.argsort(
+z = (
     omega_real
+    -
+    OMEGA_MIN
+) / (
+    OMEGA_MAX
+    -
+    OMEGA_MIN
 )
 
-k_values = k_values[
-    sort_index
-]
 
-m_values = m_values[
-    sort_index
-]
+# ------------------------------------------------------------
+# RELACIÓN NO LINEAL ENTRE ω Y k
+#
+# k = K_MIN +
+#     (K_MAX - K_MIN) * (0.3*z + 0.7*z²)
+#
+# Para:
+#
+# z = 0  -> k = 25
+# z = 1  -> k = 500
+#
+# La relación es creciente pero NO lineal.
+# ------------------------------------------------------------
 
-omega_real = omega_real[
-    sort_index
-]
-
-
-# ============================================================
-# SEPARACIÓN TRAIN / TEST
-# ============================================================
-
-k_train = k_values[
-    :N_TRAIN
-]
-
-m_train = m_values[
-    :N_TRAIN
-]
-
-omega_train = omega_real[
-    :N_TRAIN
-]
-
-
-k_test = k_values[
-    N_TRAIN:
-]
-
-m_test = m_values[
-    N_TRAIN:
-]
-
-omega_test = omega_real[
-    N_TRAIN:
-]
-
-
-# ============================================================
-# NORMALIZACIÓN DE LOS TARGETS
-# ============================================================
-
-k_train_norm = (
-    k_train
-    -
+k_values = (
     K_MIN
-) / (
-    K_MAX
-    -
-    K_MIN
+    +
+    (
+        K_MAX
+        -
+        K_MIN
+    )
+    *
+    (
+        0.3 * z
+        +
+        0.7 * z ** 2
+    )
 )
 
-m_train_norm = (
-    m_train
-    -
-    M_MIN
-) / (
-    M_MAX
-    -
-    M_MIN
+
+# ------------------------------------------------------------
+# CALCULAR m A PARTIR DE LA FÍSICA
+#
+# omega = sqrt(k/m)
+#
+# omega² = k/m
+#
+# m = k / omega²
+# ------------------------------------------------------------
+
+m_values = (
+    k_values
+    /
+    omega_real ** 2
 )
 
 
@@ -229,7 +184,7 @@ m_train_norm = (
 # ============================================================
 
 t = torch.linspace(
-    0,
+    0.0,
     T_TOTAL,
     N_POINTS
 )
@@ -238,18 +193,77 @@ dt = t[1] - t[0]
 
 
 # ============================================================
+# INFORMACIÓN DEL MUESTREO
+# ============================================================
+
+sampling_frequency = (
+    1.0
+    /
+    dt
+)
+
+nyquist_frequency = (
+    sampling_frequency
+    /
+    2.0
+)
+
+delta_f = (
+    1.0
+    /
+    T_TOTAL
+)
+
+delta_omega = (
+    2.0
+    *
+    torch.pi
+    *
+    delta_f
+)
+
+
+print()
+print("------------------------------------------------------------")
+print("MUESTREO")
+print("------------------------------------------------------------")
+
+print(
+    f"dt                = "
+    f"{dt.item():.6f} s"
+)
+
+print(
+    f"Frecuencia muestreo = "
+    f"{sampling_frequency.item():.4f} Hz"
+)
+
+print(
+    f"Frecuencia Nyquist  = "
+    f"{nyquist_frequency.item():.4f} Hz"
+)
+
+print(
+    f"Resolución FFT Δω   = "
+    f"{delta_omega:.4f} rad/s"
+)
+
+
+# ============================================================
 # FRECUENCIAS DE LA FFT
 # ============================================================
 
 frequencies = torch.fft.rfftfreq(
     N_POINTS,
-    d=dt
+    d=dt.item()
 )
 
 omega_bins = (
     2.0
-    * torch.pi
-    * frequencies
+    *
+    torch.pi
+    *
+    frequencies
 )
 
 
@@ -258,6 +272,7 @@ omega_bins = (
 # ============================================================
 
 signals = []
+
 
 for omega in omega_real:
 
@@ -279,35 +294,41 @@ signals = torch.stack(
 
 
 # ============================================================
-# OBTENER PICO FFT
+# FUNCIÓN FFT
 # ============================================================
 
 def fft_peak_omega(signals):
 
     spectrum = torch.fft.rfft(
-        signals
+        signals,
+        dim=1
     )
 
     magnitude = torch.abs(
         spectrum
     )
 
+
+    # --------------------------------------------------------
     # Ignorar componente DC
+    # --------------------------------------------------------
 
     peak_index = torch.argmax(
         magnitude[:, 1:],
         dim=1
     ) + 1
 
+
     omega_peak = omega_bins[
         peak_index
     ]
+
 
     return omega_peak
 
 
 # ============================================================
-# FRECUENCIA OBSERVADA
+# ω OBTENIDA MEDIANTE FFT
 # ============================================================
 
 with torch.no_grad():
@@ -318,16 +339,118 @@ with torch.no_grad():
 
 
 # ============================================================
-# SEPARAR FFT TRAIN / TEST
+# SPLIT ALEATORIO TRAIN / TEST
 # ============================================================
 
-omega_fft_train = omega_fft[
+indices = torch.randperm(
+    N_SYSTEMS
+)
+
+
+train_indices = indices[
     :N_TRAIN
 ]
 
-omega_fft_test = omega_fft[
+test_indices = indices[
     N_TRAIN:
 ]
+
+
+# ============================================================
+# DATOS TRAIN
+# ============================================================
+
+k_train = k_values[
+    train_indices
+]
+
+m_train = m_values[
+    train_indices
+]
+
+omega_train = omega_real[
+    train_indices
+]
+
+omega_fft_train = omega_fft[
+    train_indices
+]
+
+
+# ============================================================
+# DATOS TEST
+# ============================================================
+
+k_test = k_values[
+    test_indices
+]
+
+m_test = m_values[
+    test_indices
+]
+
+omega_test = omega_real[
+    test_indices
+]
+
+omega_fft_test = omega_fft[
+    test_indices
+]
+
+
+# ============================================================
+# NORMALIZACIÓN DE TARGETS k Y m
+# ============================================================
+
+k_train_norm = (
+    k_train
+    -
+    K_MIN
+) / (
+    K_MAX
+    -
+    K_MIN
+)
+
+
+m_train_norm = (
+    m_train
+    -
+    M_MIN
+) / (
+    M_MAX
+    -
+    M_MIN
+)
+
+
+# ============================================================
+# NORMALIZACIÓN DE LA ENTRADA ωFFT
+#
+# Se calculan media y desviación SOLO con TRAIN
+# ============================================================
+
+omega_mean = (
+    omega_fft_train.mean()
+)
+
+omega_std = (
+    omega_fft_train.std()
+)
+
+
+omega_fft_train_norm = (
+    omega_fft_train
+    -
+    omega_mean
+) / omega_std
+
+
+omega_fft_test_norm = (
+    omega_fft_test
+    -
+    omega_mean
+) / omega_std
 
 
 # ============================================================
@@ -336,31 +459,79 @@ omega_fft_test = omega_fft[
 
 print()
 print("============================================================")
-print("SISTEMAS DE ENTRENAMIENTO")
+print("INFORMACIÓN DEL DATASET")
 print("============================================================")
 
+print(
+    f"Sistemas totales = {N_SYSTEMS}"
+)
+
+print(
+    f"Train            = {N_TRAIN}"
+)
+
+print(
+    f"Test             = {N_TEST}"
+)
+
+
 print()
+
 print(
-    "k real        m real        ω real        ω FFT"
+    f"ω objetivo = "
+    f"[{OMEGA_MIN:.4f}, "
+    f"{OMEGA_MAX:.4f}] rad/s"
 )
 
 print(
-    "------------------------------------------------------------"
+    f"ω real dataset = "
+    f"[{omega_real.min().item():.4f}, "
+    f"{omega_real.max().item():.4f}] rad/s"
 )
 
-for k, m, omega, omega_f in zip(
-    k_train,
-    m_train,
-    omega_train,
-    omega_fft_train
-):
+print(
+    f"ω FFT dataset = "
+    f"[{omega_fft.min().item():.4f}, "
+    f"{omega_fft.max().item():.4f}] rad/s"
+)
 
-    print(
-        f"{k.item():8.2f}        "
-        f"{m.item():8.4f}        "
-        f"{omega.item():8.4f}        "
-        f"{omega_f.item():8.4f}"
-    )
+print()
+
+print(
+    f"m rango = "
+    f"[{m_values.min().item():.4f}, "
+    f"{m_values.max().item():.4f}]"
+)
+
+print(
+    f"k rango = "
+    f"[{k_values.min().item():.4f}, "
+    f"{k_values.max().item():.4f}]"
+)
+
+print()
+
+print(
+    f"K_MIN normalización = "
+    f"{K_MIN:.4f}"
+)
+
+print(
+    f"K_MAX normalización = "
+    f"{K_MAX:.4f}"
+)
+
+print()
+
+print(
+    f"ω train mean = "
+    f"{omega_mean.item():.4f}"
+)
+
+print(
+    f"ω train std  = "
+    f"{omega_std.item():.4f}"
+)
 
 
 # ============================================================
@@ -387,16 +558,18 @@ optimizer = torch.optim.AdamW(
 
 print()
 print("============================================================")
-print("ENTRENAMIENTO ETAPA 3")
+print("ENTRENAMIENTO ETAPA 4 - DATASET 1000 - ω 5 A 100")
 print("============================================================")
 
 print()
+
 print(
-    "Epoch        Loss total        Loss k        Loss m"
+    "Epoch        Loss total        "
+    "Loss k        Loss m        Loss phys"
 )
 
 print(
-    "------------------------------------------------------------"
+    "--------------------------------------------------------------------"
 )
 
 
@@ -412,7 +585,7 @@ for epoch in range(
     # --------------------------------------------------------
 
     k_pred_norm, m_pred_norm = model(
-        omega_fft_train.unsqueeze(1)
+        omega_fft_train_norm.unsqueeze(1)
     )
 
 
@@ -422,6 +595,40 @@ for epoch in range(
 
     m_pred_norm = (
         m_pred_norm.squeeze(1)
+    )
+
+
+    # --------------------------------------------------------
+    # DESNORMALIZAR k
+    # --------------------------------------------------------
+
+    k_pred = (
+        K_MIN
+        +
+        k_pred_norm
+        *
+        (
+            K_MAX
+            -
+            K_MIN
+        )
+    )
+
+
+    # --------------------------------------------------------
+    # DESNORMALIZAR m
+    # --------------------------------------------------------
+
+    m_pred = (
+        M_MIN
+        +
+        m_pred_norm
+        *
+        (
+            M_MAX
+            -
+            M_MIN
+        )
     )
 
 
@@ -447,6 +654,36 @@ for epoch in range(
             m_pred_norm
             -
             m_train_norm
+        ) ** 2
+    )
+
+
+    # --------------------------------------------------------
+    # DIFFERENTIABLE PHYSICS
+    #
+    # omega = sqrt(k/m)
+    # --------------------------------------------------------
+
+    omega_pred = torch.sqrt(
+        k_pred
+        /
+        m_pred
+    )
+
+
+    # --------------------------------------------------------
+    # PHYSICS LOSS
+    # --------------------------------------------------------
+
+    loss_phys = torch.mean(
+        (
+            (
+                omega_pred
+                -
+                omega_fft_train
+            )
+            /
+            omega_fft_train
         ) ** 2
     )
 
@@ -486,67 +723,22 @@ for epoch in range(
             f"{epoch:5d}        "
             f"{loss.item():14.8f}        "
             f"{loss_k.item():10.8f}        "
-            f"{loss_m.item():10.8f}"
+            f"{loss_m.item():10.8f}        "
+            f"{loss_phys.item():10.8f}"
         )
 
 
 # ============================================================
-# PREDICCIONES FINALES TRAIN
+# PREDICCIONES TEST
 # ============================================================
 
-with torch.no_grad():
+model.eval()
 
-    k_train_pred_norm, m_train_pred_norm = model(
-        omega_fft_train.unsqueeze(1)
-    )
-
-
-k_train_pred_norm = (
-    k_train_pred_norm.squeeze(1)
-)
-
-m_train_pred_norm = (
-    m_train_pred_norm.squeeze(1)
-)
-
-
-# ============================================================
-# DESNORMALIZAR TRAIN
-# ============================================================
-
-k_train_pred = (
-    K_MIN
-    +
-    k_train_pred_norm
-    *
-    (
-        K_MAX
-        -
-        K_MIN
-    )
-)
-
-m_train_pred = (
-    M_MIN
-    +
-    m_train_pred_norm
-    *
-    (
-        M_MAX
-        -
-        M_MIN
-    )
-)
-
-
-# ============================================================
-# PREDICCIONES FINALES TEST
-# ============================================================
 
 with torch.no_grad():
 
     k_test_pred_norm, m_test_pred_norm = model(
-        omega_fft_test.unsqueeze(1)
+        omega_fft_test_norm.unsqueeze(1)
     )
 
 
@@ -575,6 +767,7 @@ k_test_pred = (
     )
 )
 
+
 m_test_pred = (
     M_MIN
     +
@@ -589,48 +782,20 @@ m_test_pred = (
 
 
 # ============================================================
-# RESULTADOS TEST
+# ω PREDICHA A PARTIR DE k Y m
 # ============================================================
 
-print()
-print("============================================================")
-print("RESULTADOS TEST ETAPA 3")
-print("============================================================")
+with torch.no_grad():
 
-print()
-print(
-    "ω real        ω FFT        "
-    "k real        k pred        "
-    "m real        m pred"
-)
-
-print(
-    "--------------------------------------------------------------------------"
-)
-
-for omega_real_value, omega_fft_value, \
-    k_real, k_pred_value, \
-    m_real, m_pred_value in zip(
-        omega_test,
-        omega_fft_test,
-        k_test,
-        k_test_pred,
-        m_test,
+    omega_test_pred = torch.sqrt(
+        k_test_pred
+        /
         m_test_pred
-    ):
-
-    print(
-        f"{omega_real_value.item():8.4f}        "
-        f"{omega_fft_value.item():8.4f}        "
-        f"{k_real.item():8.4f}        "
-        f"{k_pred_value.item():8.4f}        "
-        f"{m_real.item():8.4f}        "
-        f"{m_pred_value.item():8.4f}"
     )
 
 
 # ============================================================
-# ERRORES MEDIOS
+# ERRORES TEST
 # ============================================================
 
 k_test_error = torch.mean(
@@ -659,23 +824,6 @@ m_test_error = torch.mean(
 ) * 100.0
 
 
-# ============================================================
-# FRECUENCIA RECONSTRUIDA
-# ============================================================
-
-with torch.no_grad():
-
-    omega_test_pred = torch.sqrt(
-        k_test_pred
-        /
-        m_test_pred
-    )
-
-
-# ============================================================
-# ERROR DE FRECUENCIA
-# ============================================================
-
 omega_test_error = torch.mean(
     torch.abs(
         (
@@ -690,7 +838,67 @@ omega_test_error = torch.mean(
 
 
 # ============================================================
-# MOSTRAR ERRORES
+# ERROR DE LA FFT
+# ============================================================
+
+omega_fft_error = torch.mean(
+    torch.abs(
+        (
+            omega_fft_test
+            -
+            omega_test
+        )
+        /
+        omega_test
+    )
+) * 100.0
+
+
+# ============================================================
+# ALGUNOS RESULTADOS DE TEST
+# ============================================================
+
+print()
+print("============================================================")
+print("MUESTRA DE RESULTADOS TEST")
+print("============================================================")
+
+print()
+
+print(
+    "ω real      ω FFT      ω pred      "
+    "k real        k pred        "
+    "m real      m pred"
+)
+
+print(
+    "--------------------------------------------------------------------------------------"
+)
+
+
+N_SHOW = min(
+    20,
+    N_TEST
+)
+
+
+for i in range(
+    N_SHOW
+):
+
+    print(
+        f"{omega_test[i].item():8.3f}    "
+        f"{omega_fft_test[i].item():8.3f}    "
+        f"{omega_test_pred[i].item():8.3f}    "
+        f"{k_test[i].item():11.3f}    "
+        f"{k_test_pred[i].item():11.3f}    "
+        f"{m_test[i].item():8.3f}    "
+        f"{m_test_pred[i].item():8.3f}"
+    )
+
+
+# ============================================================
+# RESULTADO GLOBAL
 # ============================================================
 
 print()
@@ -699,29 +907,66 @@ print("ERROR MEDIO TEST")
 print("============================================================")
 
 print(
-    f"Error medio relativo k = "
+    f"Error medio relativo k     = "
     f"{k_test_error.item():.4f}%"
 )
 
 print(
-    f"Error medio relativo m = "
+    f"Error medio relativo m     = "
     f"{m_test_error.item():.4f}%"
 )
 
 print(
-    f"Error medio relativo ω = "
+    f"Error medio relativo ω pred = "
     f"{omega_test_error.item():.4f}%"
 )
 
+print(
+    f"Error medio propio FFT      = "
+    f"{omega_fft_error.item():.4f}%"
+)
+
 
 # ============================================================
-# GUARDAR MODELO
+# GUARDAR MODELO + NORMALIZACIÓN
 # ============================================================
+
+checkpoint = {
+
+    "model_state_dict":
+        model.state_dict(),
+
+    "omega_mean":
+        omega_mean,
+
+    "omega_std":
+        omega_std,
+
+    "omega_min":
+        OMEGA_MIN,
+
+    "omega_max":
+        OMEGA_MAX,
+
+    "m_min":
+        M_MIN,
+
+    "m_max":
+        M_MAX,
+
+    "k_min":
+        K_MIN,
+
+    "k_max":
+        K_MAX,
+}
+
 
 torch.save(
-    model.state_dict(),
+    checkpoint,
     MODEL_PATH
 )
+
 
 print()
 print(
