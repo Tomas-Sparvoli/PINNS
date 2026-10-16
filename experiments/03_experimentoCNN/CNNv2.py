@@ -393,7 +393,7 @@ spectrum_magnitude = (
     ]
 )
 
-
+#elimina el vector de frecuencias el bin correspondiente a 0 Hz
 omega_bins_no_dc = (
     omega_bins[
         1:
@@ -430,6 +430,7 @@ with torch.no_grad():
 # RECORTAR ESPECTRO
 #
 # 0 < omega <= 120 rad/s
+# sirve para quedarnos únicamente con la parte del espectro que queremos entregarle a la CNN
 # ============================================================
 
 cnn_mask = (
@@ -933,7 +934,7 @@ for epoch in range(
     #
     # x(t) = cos(omega t)
     # ========================================================
-
+    #pasamos los datos de w de filas a columnas para poder multiplicar por el vector de tiempo
     omega_matrix = (
         omega_pred.unsqueeze(1)
     )
@@ -944,6 +945,7 @@ for epoch in range(
     )
 
 
+    #   x(t) = x0*cos(ωt) + (v0/ω)*sin(ωt) como solucion de la ecuacion diferencial de segundo orden
     x_pred_phys = (
         X0
         *

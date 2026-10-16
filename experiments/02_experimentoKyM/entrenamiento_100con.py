@@ -195,24 +195,28 @@ dt = t[1] - t[0]
 # INFORMACIÓN DEL MUESTREO
 # ============================================================
 
-sampling_frequency = (
+#frecuencia de muestreo
+sampling_frequency = (    
     1.0
     /
     dt
 )
 
+#frecuencia maxima que podemos medir sin aliasing
 nyquist_frequency = (
     sampling_frequency
     /
     2.0
 )
 
+#separacion entre cada dato
 delta_f = (
     1.0
     /
     T_TOTAL
 )
 
+#se pasa a frecuencia angular 
 delta_omega = (
     2.0
     *
